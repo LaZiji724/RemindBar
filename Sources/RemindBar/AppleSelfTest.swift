@@ -112,7 +112,8 @@ enum AppleSelfTest {
         check(first.created == 4 && first.failures.isEmpty, "four reminders are written to Reminders", first.text)
         let bed = await appleItem("自检-睡觉")
         check(bed != nil && bed?.fields.hasTime == true && bed?.fields.due == in3h, "a timed reminder keeps its time", "\(fmt(bed?.fields.due)) vs \(fmt(in3h))")
-        check(bed?.alarmDates.contains { minute($0) == in3h } == true, "…and has an alarm at that time", bed?.alarmDates.map(fmt).joined(separator: ",") ?? "nil")
+        check(Set((bed?.alarmDates ?? []).map(minute)) == Set([in3h.addingTimeInterval(-1_800), in3h.addingTimeInterval(-180), in3h]),
+              "…and has the alarms still to come: 30 and 3 minutes ahead, and at that time", bed?.alarmDates.map(fmt).joined(separator: ",") ?? "nil")
         check(bed?.listID == list.id, "…in the temporary list only")
         check((bed?.externalID ?? "").isEmpty == false, "…with a server identifier", bed?.externalID ?? "nil")
         let material = await appleItem("自检-交材料")
@@ -125,7 +126,8 @@ enum AppleSelfTest {
         check(site?.fields.due == minute(deadline), "a website deadline is written to the minute", "\(fmt(site?.fields.due)) vs \(fmt(minute(deadline)))")
         check(site?.notes?.contains("自检课程") == true && site?.notes?.contains("Canvas") == true, "…with a note naming course and site", site?.notes ?? "nil")
         check(site?.url == siteURL, "…and the link to the assignment", site?.url ?? "nil")
-        check(site?.alarmDates.contains { minute($0) == minute(deadline) } == true, "…and an alarm at the deadline")
+        check(Set((site?.alarmDates ?? []).map(minute)) == Set(LeadTimes.standard.map { minute(deadline.addingTimeInterval(-$0)) }),
+              "…and the five alarms: 1 day, 3 hours, 30 and 3 minutes ahead, and at the deadline", site?.alarmDates.map(fmt).joined(separator: ",") ?? "nil")
         if let id = bed?.id {
             check(store.item(withID: id)?.fields.title == "自检-睡觉", "a reminder can be found again by its identifier")
             check(bed?.externalID.map { store.items(withExternalID: $0).contains { $0.id == id } } == true, "…and by its server identifier")
@@ -141,7 +143,7 @@ enum AppleSelfTest {
             change.title = "自检-睡觉(改)"
             change.due = .set(in3h.addingTimeInterval(3_600), hasTime: true)
             change.removeAlarms = [in3h]
-            change.addAlarm = in3h.addingTimeInterval(3_600)
+            change.addAlarms = [in3h.addingTimeInterval(3_600)]
             _ = try? store.update(id: id, change)
         }
         if let id = appleID("自检-买牛奶") {
@@ -162,6 +164,10 @@ enum AppleSelfTest {
         check(reminder("自检-买牛奶")?.status == .done, "ticking in Reminders completes it here")
         check(reminder("自检-Siri")?.source == .apple && reminder("自检-Siri")?.due == in3h.addingTimeInterval(7_200), "a reminder made there is imported")
         check(reminder("自检-网站作业")?.status == .pending, "ticking a website copy does not complete the item")
+        let bed2 = await appleItem("自检-睡觉(改)")
+        let in4h = in3h.addingTimeInterval(3_600)
+        check(Set((bed2?.alarmDates ?? []).map(minute)) == Set(LeadTimes.standard.map { minute(in4h.addingTimeInterval(-$0)) }.filter { $0 > now }),
+              "the early alarms follow a time changed in Reminders", bed2?.alarmDates.map(fmt).joined(separator: ",") ?? "nil")
         let quiet2 = await sync("settling")
         check(!quiet2.changedAnything, "and then it is quiet again", quiet2.text)
 
@@ -199,7 +205,8 @@ enum AppleSelfTest {
         await sync("second item's deadline moved")
         let copy2 = await appleItem("自检-网站作业2")
         check(copy2?.fields.due == minute(moved2), "a deadline moved by the website moves an open copy", fmt(copy2?.fields.due))
-        check(copy2?.alarmDates.count == 1 && copy2?.alarmDates.first.map(minute) == minute(moved2), "…and its alarm moves with it", copy2?.alarmDates.map(fmt).joined(separator: ",") ?? "nil")
+        check(Set((copy2?.alarmDates ?? []).map(minute)) == Set(LeadTimes.standard.map { minute(moved2.addingTimeInterval(-$0)) }),
+              "…and its alarms move with it", copy2?.alarmDates.map(fmt).joined(separator: ",") ?? "nil")
         if let i = reminders.firstIndex(where: { $0.title == "自检-网站作业2" }) { reminders[i].ignored = true }
         await sync("after ignoring")
         check(await appleItem("自检-网站作业2") == nil, "ignoring removes its copy")

@@ -75,7 +75,7 @@ public final class InMemoryAppleStore: AppleReminderStore {
         guard allLists.contains(where: { $0.id == listID }) else { throw AppleStoreError.listMissing }
         let n = nextNumber()
         let item = AppleItem(id: "R\(n)", externalID: "E\(n)", listID: listID, fields: new.fields, completedAt: nil,
-                             alarmDates: new.alarm.map { [$0] } ?? [], notes: new.notes, url: new.url, modifiedAt: clock())
+                             alarmDates: new.alarms, notes: new.notes, url: new.url, modifiedAt: clock())
         items[item.id] = item
         writes += 1
         return item
@@ -99,7 +99,7 @@ public final class InMemoryAppleStore: AppleReminderStore {
             item.completedAt = done ? clock() : nil
         }
         item.alarmDates.removeAll { alarm in change.removeAlarms.contains { sameMinute($0, alarm) } }
-        if let alarm = change.addAlarm, !item.alarmDates.contains(where: { sameMinute($0, alarm) }) { item.alarmDates.append(alarm) }
+        for alarm in change.addAlarms where !item.alarmDates.contains(where: { sameMinute($0, alarm) }) { item.alarmDates.append(alarm) }
         item.fields = f
         item.modifiedAt = clock()
         items[id] = item

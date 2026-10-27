@@ -45,11 +45,11 @@ struct AppleSettings: View {
                     Toggle("包含网站来的作业（Canvas、课堂派、监控的网页）", isOn: Binding(
                         get: { config.includeWebsiteItems },
                         set: { value in model.updateAppleConfig { $0.includeWebsiteItems = value }; service.syncSoon(after: 0.3) }))
-                    Toggle("给提醒事项里的副本设置到点闹铃（iPhone 上也会响）", isOn: Binding(
+                    Toggle("给提醒事项里的副本设置闹铃：前 1 天、3 小时、30 分钟、3 分钟和到点（iPhone 上也会响）", isOn: Binding(
                         get: { config.alarms },
                         set: { value in model.updateAppleConfig { $0.alarms = value }; service.syncSoon(after: 0.3) }))
                 } footer: {
-                    Text("网站作业的副本是单向的：是否完成以网站为准，在提醒事项里勾选或修改它不会影响提醒条。开了闹铃后，Mac 上到点时提醒条和“提醒事项”会各响一次。有重复规则的提醒事项暂不导入。")
+                    Text("网站作业的副本是单向的：是否完成以网站为准，在提醒事项里勾选或修改它不会影响提醒条。开了闹铃后，Mac 上每个提醒时刻提醒条和“提醒事项”会各响一次。只有提醒条写进去的副本带闹铃，你自己在提醒事项里建的提醒保持原样。有重复规则的提醒事项暂不导入。")
                 }
 
                 Section {

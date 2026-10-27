@@ -91,14 +91,14 @@ public struct AppleNewItem: Equatable, Sendable {
     public var fields: AppleFields
     public var notes: String?
     public var url: String?
-    /// A fixed-moment alarm (so the iPhone rings at the deadline too).
-    public var alarm: Date?
+    /// Fixed-moment alarms (so the iPhone rings ahead of the deadline and at it).
+    public var alarms: [Date]
 
-    public init(fields: AppleFields, notes: String? = nil, url: String? = nil, alarm: Date? = nil) {
+    public init(fields: AppleFields, notes: String? = nil, url: String? = nil, alarms: [Date] = []) {
         self.fields = fields
         self.notes = notes
         self.url = url
-        self.alarm = alarm
+        self.alarms = alarms
     }
 }
 
@@ -111,14 +111,15 @@ public struct AppleChange: Equatable, Sendable {
     public var title: String?
     public var due: Due?
     public var completed: Bool?
-    public var addAlarm: Date?
+    /// Fixed-moment alarms to add.
+    public var addAlarms: [Date] = []
     /// Fixed-moment alarms at these minutes are taken away.
     public var removeAlarms: [Date] = []
 
     public init() {}
 
     public var isEmpty: Bool {
-        title == nil && due == nil && completed == nil && addAlarm == nil && removeAlarms.isEmpty
+        title == nil && due == nil && completed == nil && addAlarms.isEmpty && removeAlarms.isEmpty
     }
 }
 
@@ -203,7 +204,7 @@ public struct AppleSyncConfig: Codable, Equatable, Sendable {
     public var importListIDs: [String] = []
     /// Also mirror reminders that come from Canvas, 课堂派 and watched pages.
     public var includeWebsiteItems: Bool = true
-    /// Give the copies in Apple's Reminders an alarm at the due time, so the iPhone rings too.
+    /// Give the copies in Apple's Reminders the same alarms this app rings (1 day ahead … the due time), so the iPhone rings too.
     public var alarms: Bool = true
     /// The default list was considered for import the first time the link was switched on.
     public var defaultListOffered: Bool = false

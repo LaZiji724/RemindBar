@@ -58,6 +58,11 @@ enum AppleSyncTests {
         Reminder(title: title, due: due.map(date), hasExplicitTime: timed, createdAt: Fixture.now)
     }
 
+    /// The alarms of an Apple reminder, earliest first.
+    static func alarms(_ item: AppleItem?) -> [String]? {
+        item.map { $0.alarmDates.sorted().map { Fixture.format($0) ?? "" } }
+    }
+
     @MainActor
     static func run(_ h: Harness) async {
         fields(h)
@@ -124,7 +129,8 @@ enum AppleSyncTests {
         let bed = rig.apple(for: "去睡觉")
         h.equal(Fixture.format(bed?.fields.due), "2026-10-26 23:00", "a time is carried over")
         h.equal(bed?.fields.hasTime, true, "…as a time")
-        h.equal(bed?.alarmDates.map { Fixture.format($0) ?? "" }, ["2026-10-26 23:00"], "a future timed item gets an alarm at its time")
+        h.equal(alarms(bed), ["2026-10-26 22:30", "2026-10-26 22:57", "2026-10-26 23:00"],
+                "a future timed item gets the alarms still to come: 30 and 3 minutes ahead, and at its time")
         let material = rig.apple(for: "交材料")
         h.equal(Fixture.format(material?.fields.due), "2026-10-29 00:00", "a date without a time stays a plain date")
         h.equal(material?.fields.hasTime, false, "…without a time of day")
@@ -134,7 +140,8 @@ enum AppleSyncTests {
         h.equal(milk?.alarmDates.count, 0, "…and has no alarm")
         let canvas = rig.apple(for: "第六周作业")
         h.equal(Fixture.format(canvas?.fields.due), "2026-10-28 23:59", "a deadline's seconds are dropped")
-        h.equal(canvas?.alarmDates.map { Fixture.format($0) ?? "" }, ["2026-10-28 23:59"], "a website deadline gets an alarm too")
+        h.equal(alarms(canvas), ["2026-10-27 23:59", "2026-10-28 20:59", "2026-10-28 23:29", "2026-10-28 23:56", "2026-10-28 23:59"],
+                "a website deadline gets all five: 1 day, 3 hours, 30 and 3 minutes ahead, and at the deadline")
         h.check(canvas?.notes?.contains("材料力学B") == true && canvas?.notes?.contains("Canvas") == true, "its note names the course and the site", canvas?.notes ?? "nil")
         h.check(canvas?.notes?.contains("以网站为准") == true, "…and says the website decides", canvas?.notes ?? "nil")
         h.equal(canvas?.url, "https://canvas.tongji.edu.cn/courses/1/assignments/1", "…and carries the link to the assignment")
@@ -168,12 +175,16 @@ enum AppleSyncTests {
         h.equal(rig.reminder("开项目会")?.title, "开项目会", "a new title in Reminders comes over")
         h.equal(Fixture.format(rig.reminder("开项目会")?.due), "2026-10-27 16:30", "…and a new time")
         h.equal(rig.reminder("开项目会")?.hasExplicitTime, true, "…still with a time")
-        h.equal(rig.store.writes, w, "taking over an edit writes nothing back")
-        h.equal(rig.apple(for: "开项目会")?.alarmDates.map { Fixture.format($0) ?? "" }, ["2026-10-27 16:30"], "…the alarm Reminders moved stays as it is")
-        // Were the alarm left behind at the old time, the app would put it right (only that).
+        h.equal(rig.store.writes, w + 1, "taking over an edit costs one write: the early alarms are put right")
+        h.equal(alarms(rig.apple(for: "开项目会")), ["2026-10-27 13:30", "2026-10-27 16:00", "2026-10-27 16:27", "2026-10-27 16:30"],
+                "…the alarm Reminders moved stays, the early ones follow the new time")
+        await rig.sync()
+        h.equal(rig.store.writes, w + 1, "…and then it is quiet")
+        // Were the alarms left behind at the old time, the app would put them right (only them).
         rig.store.userSetDue(meeting, date("2026-10-27 18:00"))
         await rig.sync()
-        h.equal(rig.apple(for: "开项目会")?.alarmDates.map { Fixture.format($0) ?? "" }, ["2026-10-27 18:00"], "an alarm left at the old time is moved to the new one")
+        h.equal(alarms(rig.apple(for: "开项目会")), ["2026-10-27 15:00", "2026-10-27 17:30", "2026-10-27 17:57", "2026-10-27 18:00"],
+                "alarms left at the old time are moved to the new one")
         rig.store.userSetDue(meeting, date("2026-10-27 16:30"), moveAlarms: true)
         await rig.sync()
 
@@ -196,7 +207,8 @@ enum AppleSyncTests {
         rig.setReminder("开项目会") { $0.due = date("2026-10-27 17:00") }
         await rig.sync()
         h.equal(Fixture.format(rig.apple(for: "开项目会")?.fields.due), "2026-10-27 17:00", "a new time here is written to Reminders")
-        h.equal(rig.apple(for: "开项目会")?.alarmDates.map { Fixture.format($0) ?? "" }, ["2026-10-27 17:00"], "…and the alarm moves with it")
+        h.equal(alarms(rig.apple(for: "开项目会")), ["2026-10-27 14:00", "2026-10-27 16:30", "2026-10-27 16:57", "2026-10-27 17:00"],
+                "…and the alarms move with it")
     }
 
     // MARK: website copies are a mirror
@@ -238,7 +250,8 @@ enum AppleSyncTests {
         rig.setReminder("第六周作业") { $0.due = date("2026-10-30 23:59") }
         await rig.sync()
         h.equal(Fixture.format(rig.apple(for: "第六周作业")?.fields.due), "2026-10-30 23:59", "a deadline moved by the website moves the copy")
-        h.equal(rig.apple(for: "第六周作业")?.alarmDates.map { Fixture.format($0) ?? "" }, ["2026-10-30 23:59"], "…and its alarm")
+        h.equal(alarms(rig.apple(for: "第六周作业")), ["2026-10-29 23:59", "2026-10-30 20:59", "2026-10-30 23:29", "2026-10-30 23:56", "2026-10-30 23:59"],
+                "…and its alarms")
         h.equal(rig.apple(for: "第六周作业")?.fields.title, "我改的标题", "…while an edit of the title that the website did not touch stays as it is")
 
         // The website finishes it while the copy is open: the copy is ticked.
@@ -515,13 +528,14 @@ enum AppleSyncTests {
         h.equal(rig2.apple(for: "开会")?.alarmDates.count, 0, "with alarms off a copy gets none")
         rig2.options.alarms = true
         await rig2.sync()
-        h.equal(rig2.apple(for: "开会")?.alarmDates.map { Fixture.format($0) ?? "" }, ["2026-10-27 15:00"], "switching them on adds the alarm to existing copies")
+        h.equal(alarms(rig2.apple(for: "开会")), ["2026-10-27 12:00", "2026-10-27 14:30", "2026-10-27 14:57", "2026-10-27 15:00"],
+                "switching them on adds the alarms to existing copies")
         let w = rig2.store.writes
         await rig2.sync()
         h.equal(rig2.store.writes, w, "…once")
         rig2.options.alarms = false
         await rig2.sync()
-        h.equal(rig2.apple(for: "开会")?.alarmDates.count, 0, "switching them off takes the alarm away again")
+        h.equal(rig2.apple(for: "开会")?.alarmDates.count, 0, "switching them off takes the alarms away again")
 
         // A reminder in the past gets no alarm, and a finished one keeps nothing to ring.
         let rig3 = AppleRig()
@@ -534,6 +548,39 @@ enum AppleSyncTests {
         await rig4.sync()
         await rig4.sync()
         h.equal(rig4.appleItems().first?.alarmDates.count, 0, "an imported reminder keeps exactly the alarms it had")
+
+        // A copy that only has the alarm at its time (written before the early alarms existed) gets the others once the
+        // reminder has the standard schedule.
+        let rig5 = AppleRig()
+        rig5.reminders = [own("开会", due: "2026-10-27 15:00")]
+        rig5.setReminder("开会") { $0.leadTimes = [0] }
+        await rig5.sync()
+        h.equal(alarms(rig5.apple(for: "开会")), ["2026-10-27 15:00"], "a reminder that only alerts at its time gets that one alarm")
+        rig5.setReminder("开会") { $0.leadTimes = LeadTimes.standard }
+        await rig5.sync()
+        h.equal(alarms(rig5.apple(for: "开会")), ["2026-10-27 12:00", "2026-10-27 14:30", "2026-10-27 14:57", "2026-10-27 15:00"],
+                "…and the early alarms are added once it has the standard schedule")
+        let w5 = rig5.store.writes
+        await rig5.sync()
+        h.equal(rig5.store.writes, w5, "…once")
+        // Alarms that have gone off stay where they are, so nothing is taken back from a phone that has just rung.
+        rig5.options.now = date("2026-10-27 14:40")
+        await rig5.sync()
+        h.equal(rig5.store.writes, w5, "alarms that have gone off are left alone")
+        h.equal(alarms(rig5.apple(for: "开会")), ["2026-10-27 12:00", "2026-10-27 14:30", "2026-10-27 14:57", "2026-10-27 15:00"],
+                "…and so are the ones still to come")
+        // Finishing the reminder takes every alarm away.
+        rig5.setReminder("开会") { $0.status = .done; $0.completedAt = Fixture.now }
+        await rig5.sync()
+        h.equal(rig5.apple(for: "开会")?.fields.completed, true, "finishing it ticks the copy")
+        h.equal(rig5.apple(for: "开会")?.alarmDates.count, 0, "…and takes all its alarms away")
+
+        // A reminder with its own schedule gets exactly those alarms.
+        let rig6 = AppleRig()
+        rig6.reminders = [own("提前十分钟", due: "2026-10-27 15:00")]
+        rig6.setReminder("提前十分钟") { $0.leadTimes = [600, 0] }
+        await rig6.sync()
+        h.equal(alarms(rig6.apple(for: "提前十分钟")), ["2026-10-27 14:50", "2026-10-27 15:00"], "a custom schedule gives exactly its alarms")
     }
 
     // MARK: identity

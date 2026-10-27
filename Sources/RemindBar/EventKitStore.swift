@@ -138,7 +138,7 @@ final class EventKitStore: AppleReminderStore {
         reminder.dueDateComponents = new.fields.due.map { components(for: $0, hasTime: new.fields.hasTime) }
         if let notes = new.notes { reminder.notes = notes }
         if let link = new.url, let url = URL(string: link) { reminder.url = url }
-        if let alarm = new.alarm { reminder.addAlarm(EKAlarm(absoluteDate: alarm)) }
+        for alarm in new.alarms { reminder.addAlarm(EKAlarm(absoluteDate: alarm)) }
         try store.save(reminder, commit: true)
         return Self.convert(reminder, calendar: calendar)
     }
@@ -160,7 +160,7 @@ final class EventKitStore: AppleReminderStore {
                 }
             }
         }
-        if let alarm = change.addAlarm { reminder.addAlarm(EKAlarm(absoluteDate: alarm)) }
+        for alarm in change.addAlarms { reminder.addAlarm(EKAlarm(absoluteDate: alarm)) }
         try store.save(reminder, commit: true)
         return Self.convert(reminder, calendar: calendar)
     }
