@@ -118,6 +118,8 @@ final class AppModel: ObservableObject {
                 watchers[i].lastSyncAt = nil
                 migrated = true
             }
+            // Each reminder saves its own alert schedule: bring the ones made before the 3-minute warning up to date.
+            if LeadTimes.upgrade(&reminders) { migrated = true }
             if migrated { save() }
         }
     }

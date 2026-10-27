@@ -37,10 +37,22 @@ public enum ReminderStatus: String, Codable, Sendable {
 }
 
 public enum LeadTimes {
-    /// Plain reminders only fire at the due time.
-    public static let manual: [Double] = [0]
-    /// Deadlines warn 1 day, 3 hours, 30 minutes ahead and at the deadline.
-    public static let deadline: [Double] = [86_400, 10_800, 1_800, 0]
+    /// Every reminder, deadline or not, alerts 1 day, 3 hours, 30 minutes and 3 minutes ahead, and at the due time.
+    public static let standard: [Double] = [86_400, 10_800, 1_800, 180, 0]
+    /// What earlier versions gave new reminders: plain ones only the due time, deadlines also 1 day, 3 hours and 30 minutes ahead.
+    private static let earlier: [[Double]] = [[0], [86_400, 10_800, 1_800, 0]]
+
+    /// A reminder keeps the schedule it was made with, so ones saved by an earlier version are moved to the current one.
+    /// Returns whether anything changed.
+    @discardableResult
+    public static func upgrade(_ reminders: inout [Reminder]) -> Bool {
+        var changed = false
+        for i in reminders.indices where earlier.contains(reminders[i].leadTimes) {
+            reminders[i].leadTimes = standard
+            changed = true
+        }
+        return changed
+    }
 }
 
 public struct Reminder: Codable, Identifiable, Equatable, Sendable {
@@ -88,7 +100,7 @@ public struct Reminder: Codable, Identifiable, Equatable, Sendable {
         self.course = course
         self.url = url
         self.notes = notes
-        self.leadTimes = leadTimes ?? (isDeadline ? LeadTimes.deadline : LeadTimes.manual)
+        self.leadTimes = leadTimes ?? LeadTimes.standard
         self.status = status
         self.snoozedUntil = snoozedUntil
         self.createdAt = createdAt

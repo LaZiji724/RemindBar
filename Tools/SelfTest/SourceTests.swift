@@ -104,7 +104,7 @@ enum SourceTests {
         h.equal(lab4?.source, .canvas, "source kind")
         h.equal(lab4?.watcherID, "w-canvas", "watcher id")
         h.equal(lab4?.isDeadline, true, "synced items are deadlines")
-        h.equal(lab4?.leadTimes, LeadTimes.deadline, "deadline alert schedule")
+        h.equal(lab4?.leadTimes, LeadTimes.standard, "alert schedule")
         h.equal(Fixture.format(lab4?.due), "2026-10-30 23:59", "due time")
 
         // Second sync with the same data: nothing changes.

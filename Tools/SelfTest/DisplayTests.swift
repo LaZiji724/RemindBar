@@ -52,6 +52,8 @@ enum DisplayTests {
         r.course = "数据库原理"
         h.equal(DisplayFormat.alertBody(for: r, lead: 10_800, now: now, calendar: cal),
                 "还有3小时截止 · Canvas · 数据库原理 · 后天 20:00", "alert body with lead time")
+        h.equal(DisplayFormat.alertBody(for: r, lead: 180, now: now, calendar: cal),
+                "还有3分钟截止 · Canvas · 数据库原理 · 后天 20:00", "alert body three minutes ahead")
         h.equal(DisplayFormat.alertBody(for: r, lead: 0, now: now, calendar: cal),
                 "已到截止时间 · Canvas · 数据库原理 · 后天 20:00", "alert body at the deadline")
     }

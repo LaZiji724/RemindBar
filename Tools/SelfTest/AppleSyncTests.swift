@@ -404,7 +404,7 @@ enum AppleSyncTests {
         h.equal(Fixture.format(rig.reminder("买牛奶")?.due), "2026-10-27 09:00", "a date alone is reminded at the default time")
         h.equal(rig.reminder("买牛奶")?.hasExplicitTime, false, "…and knows the time was not given")
         h.equal(rig.reminder("买鸡蛋")?.due == nil, true, "an undated reminder stays undated")
-        h.equal(rig.reminder("明天交作业")?.leadTimes, LeadTimes.manual, "…and alerts only at its time")
+        h.equal(rig.reminder("明天交作业")?.leadTimes, LeadTimes.standard, "…and gets the standard alerts")
         h.check(rig.links.allSatisfy { $0.origin == .apple && $0.synced != nil }, "the links remember where they came from")
         h.equal(rig.store.writes, 0, "importing writes nothing to Reminders")
         let again = await rig.sync()

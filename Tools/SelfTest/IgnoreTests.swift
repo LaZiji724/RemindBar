@@ -18,13 +18,13 @@ enum IgnoreTests {
 
         // No alerts at all while ignored; they come back when restored.
         var item = site("canvas:assignment:1", "第六周作业", due: "2026-10-28 23:59")
-        h.equal(FirePlanner.fires(for: item, after: now).count, 4, "an ordinary deadline has four alerts")
+        h.equal(FirePlanner.fires(for: item, after: now).count, LeadTimes.standard.count, "an ordinary deadline has all its alerts")
         item.ignored = true
         h.equal(FirePlanner.fires(for: item, after: now).count, 0, "an ignored item has no alerts")
         h.equal(FirePlanner.missed([item], from: now, to: Fixture.date("2026-10-29 00:00")).count, 0, "…and none are caught up later")
         h.equal(FirePlanner.plan([item], after: now).count, 0, "…and none are scheduled with the system")
         item.ignored = false
-        h.equal(FirePlanner.fires(for: item, after: now).count, 4, "restoring brings the alerts back")
+        h.equal(FirePlanner.fires(for: item, after: now).count, LeadTimes.standard.count, "restoring brings the alerts back")
 
         // Storage: optional on disk, so old files decode and a normal item adds nothing.
         let plain = try? JSONEncoder().encode(item)

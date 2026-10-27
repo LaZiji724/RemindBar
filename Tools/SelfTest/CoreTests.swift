@@ -40,12 +40,26 @@ enum CoreTests {
         h.suite = "model"
         let deadline = NLParser.parse("周五前交作业", context: Fixture.context)[0]
         let r1 = Reminder(from: deadline, now: Fixture.now)
-        h.equal(r1.leadTimes, LeadTimes.deadline, "deadline reminders get the deadline lead times")
+        h.equal(r1.leadTimes, LeadTimes.standard, "deadline reminders get the standard lead times")
         h.equal(r1.title, "交作业", "title carried over")
         let plain = NLParser.parse("明天下午3点开会", context: Fixture.context)[0]
         let r2 = Reminder(from: plain, now: Fixture.now)
-        h.equal(r2.leadTimes, LeadTimes.manual, "plain reminders fire only at the due time")
+        h.equal(r2.leadTimes, LeadTimes.standard, "plain reminders get the same lead times")
         h.equal(r2.source, .manual, "manual source")
+        h.equal(LeadTimes.standard, [86_400, 10_800, 1_800, 180, 0], "1 day, 3 hours, 30 minutes, 3 minutes ahead, and the due time")
+
+        // Reminders saved with an earlier schedule move to the current one; a custom schedule stays.
+        var saved = [
+            Reminder(title: "旧提醒", due: nil, leadTimes: [0]),
+            Reminder(title: "旧作业", due: nil, isDeadline: true, leadTimes: [86_400, 10_800, 1_800, 0]),
+            Reminder(title: "已完成", due: nil, leadTimes: [0], status: .done),
+            Reminder(title: "自定义", due: nil, leadTimes: [127]),
+            Reminder(title: "新提醒", due: nil)
+        ]
+        h.equal(LeadTimes.upgrade(&saved), true, "an earlier schedule is upgraded")
+        h.equal(saved.map(\.leadTimes), [LeadTimes.standard, LeadTimes.standard, LeadTimes.standard, [127], LeadTimes.standard],
+                "…also on finished reminders, but a custom schedule is left alone")
+        h.equal(LeadTimes.upgrade(&saved), false, "upgrading again changes nothing")
     }
 
     // MARK: fire planning
@@ -56,10 +70,12 @@ enum CoreTests {
         var r = Reminder(title: "交作业", due: due, isDeadline: true)
         let now = Fixture.now
         let all = FirePlanner.fires(for: r, after: now).map { Fixture.format($0.at) }
-        h.equal(all, ["2026-10-27 20:00", "2026-10-28 17:00", "2026-10-28 19:30", "2026-10-28 20:00"],
-                "deadline reminder fires 1d / 3h / 30m ahead and at the deadline")
+        h.equal(all, ["2026-10-27 20:00", "2026-10-28 17:00", "2026-10-28 19:30", "2026-10-28 19:57", "2026-10-28 20:00"],
+                "reminder fires 1d / 3h / 30m / 3m ahead and at the due time")
+        let plain = FirePlanner.fires(for: Reminder(title: "开会", due: due), after: now).map { Fixture.format($0.at) }
+        h.equal(plain, all, "a plain reminder alerts at the same moments")
         let later = FirePlanner.fires(for: r, after: Fixture.date("2026-10-28 18:00")).map { Fixture.format($0.at) }
-        h.equal(later, ["2026-10-28 19:30", "2026-10-28 20:00"], "past alerts are skipped")
+        h.equal(later, ["2026-10-28 19:30", "2026-10-28 19:57", "2026-10-28 20:00"], "past alerts are skipped")
 
         r.snoozedUntil = Fixture.date("2026-10-26 22:00")
         let snoozed = FirePlanner.fires(for: r, after: now)
@@ -70,7 +86,7 @@ enum CoreTests {
         h.equal(FirePlanner.fires(for: r, after: now).count, 0, "completed reminders never fire")
 
         let many = (0..<100).map { i in
-            Reminder(title: "r\(i)", due: now.addingTimeInterval(Double(i + 1) * 600))
+            Reminder(title: "r\(i)", due: now.addingTimeInterval(Double(i + 1) * 600), leadTimes: [0])
         }
         let plan = FirePlanner.plan(many, after: now, limit: 60)
         h.equal(plan.count, 60, "plan is capped at the notification limit")
