@@ -1,0 +1,95 @@
+[
+  {
+    "context_type": "Course",
+    "course_id": "30001",
+    "context_name": "数据库原理",
+    "plannable_type": "assignment",
+    "plannable_id": "9001",
+    "planner_override": null,
+    "plannable_date": "2026-10-30T15:59:00Z",
+    "submissions": { "submitted": false, "excused": false, "graded": false, "late": false, "missing": false, "needs_grading": false, "has_feedback": false, "redo_request": false },
+    "plannable": { "id": "9001", "title": "Lab 4 提交", "due_at": "2026-10-30T15:59:00Z", "points_possible": 10.0 },
+    "html_url": "/courses/30001/assignments/9001",
+    "new_activity": false
+  },
+  {
+    "context_type": "Course",
+    "course_id": "30001",
+    "context_name": "数据库原理",
+    "plannable_type": "assignment",
+    "plannable_id": "9002",
+    "planner_override": null,
+    "plannable_date": "2026-10-28T15:59:00Z",
+    "submissions": { "submitted": true, "excused": false, "graded": false, "late": false, "missing": false },
+    "plannable": { "id": "9002", "title": "Lab 3 提交", "due_at": "2026-10-28T15:59:00Z" },
+    "html_url": "/courses/30001/assignments/9002"
+  },
+  {
+    "context_type": "Course",
+    "course_id": "30002",
+    "context_name": "操作系统",
+    "plannable_type": "quiz",
+    "plannable_id": 7001,
+    "planner_override": null,
+    "plannable_date": "2026-10-27T04:00:00Z",
+    "submissions": false,
+    "plannable": { "id": 7001, "title": "第三章小测", "due_at": "2026-10-27T04:00:00Z" },
+    "html_url": "https://canvas.tongji.edu.cn/courses/30002/quizzes/7001"
+  },
+  {
+    "context_type": "Course",
+    "course_id": "30002",
+    "context_name": "操作系统",
+    "plannable_type": "discussion_topic",
+    "plannable_id": "5001",
+    "planner_override": null,
+    "plannable_date": "2026-11-02T15:59:00Z",
+    "submissions": { "submitted": false, "excused": false },
+    "plannable": { "id": "5001", "title": "讨论：进程调度", "due_at": "2026-11-02T15:59:00Z" },
+    "html_url": "/courses/30002/discussion_topics/5001"
+  },
+  {
+    "context_type": "Course",
+    "course_id": "30003",
+    "context_name": "编译原理",
+    "plannable_type": "assignment",
+    "plannable_id": "9003",
+    "planner_override": { "id": "1", "marked_complete": true, "dismissed": false },
+    "plannable_date": "2026-11-05T15:59:00Z",
+    "submissions": { "submitted": false, "excused": false },
+    "plannable": { "id": "9003", "title": "词法分析作业", "due_at": "2026-11-05T15:59:00Z" },
+    "html_url": "/courses/30003/assignments/9003"
+  },
+  {
+    "context_type": "Course",
+    "course_id": "30003",
+    "context_name": "编译原理",
+    "plannable_type": "assignment",
+    "plannable_id": "9004",
+    "planner_override": null,
+    "plannable_date": null,
+    "submissions": { "submitted": false },
+    "plannable": { "id": "9004", "title": "没有截止日期的阅读", "due_at": null },
+    "html_url": "/courses/30003/assignments/9004"
+  },
+  {
+    "context_type": "User",
+    "plannable_type": "planner_note",
+    "plannable_id": "1",
+    "planner_override": null,
+    "plannable_date": "2026-10-29T01:00:00Z",
+    "submissions": false,
+    "plannable": { "id": "1", "title": "自己记的笔记", "todo_date": "2026-10-29T01:00:00Z" }
+  },
+  {
+    "context_type": "Course",
+    "course_id": "30001",
+    "context_name": "数据库原理",
+    "plannable_type": "calendar_event",
+    "plannable_id": "3001",
+    "planner_override": null,
+    "plannable_date": "2026-10-29T00:00:00Z",
+    "submissions": false,
+    "plannable": { "id": "3001", "title": "课程答疑", "start_at": "2026-10-29T00:00:00Z" }
+  }
+]
