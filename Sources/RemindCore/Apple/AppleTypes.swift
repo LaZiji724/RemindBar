@@ -67,13 +67,15 @@ public struct AppleItem: Equatable, Sendable {
     public var hasRecurrence: Bool
     /// Alarms that go off at a fixed moment.
     public var alarmDates: [Date]
+    /// Alarms set relative to the deadline, in seconds (negative: before it).
+    public var alarmOffsets: [TimeInterval]
     public var notes: String?
     public var url: String?
     public var modifiedAt: Date?
 
     public init(id: String, externalID: String? = nil, listID: String, fields: AppleFields, completedAt: Date? = nil,
-                hasRecurrence: Bool = false, alarmDates: [Date] = [], notes: String? = nil, url: String? = nil,
-                modifiedAt: Date? = nil) {
+                hasRecurrence: Bool = false, alarmDates: [Date] = [], alarmOffsets: [TimeInterval] = [], notes: String? = nil,
+                url: String? = nil, modifiedAt: Date? = nil) {
         self.id = id
         self.externalID = externalID
         self.listID = listID
@@ -81,6 +83,7 @@ public struct AppleItem: Equatable, Sendable {
         self.completedAt = completedAt
         self.hasRecurrence = hasRecurrence
         self.alarmDates = alarmDates
+        self.alarmOffsets = alarmOffsets
         self.notes = notes
         self.url = url
         self.modifiedAt = modifiedAt
@@ -91,7 +94,7 @@ public struct AppleNewItem: Equatable, Sendable {
     public var fields: AppleFields
     public var notes: String?
     public var url: String?
-    /// Fixed-moment alarms (so the iPhone rings ahead of the deadline and at it).
+    /// Fixed-moment alarms (so the iPhone rings at the deadline).
     public var alarms: [Date]
 
     public init(fields: AppleFields, notes: String? = nil, url: String? = nil, alarms: [Date] = []) {
@@ -115,11 +118,15 @@ public struct AppleChange: Equatable, Sendable {
     public var addAlarms: [Date] = []
     /// Fixed-moment alarms at these minutes are taken away.
     public var removeAlarms: [Date] = []
+    /// Alarms relative to the deadline to add / take away (seconds, negative before it).
+    public var addAlarmOffsets: [TimeInterval] = []
+    public var removeAlarmOffsets: [TimeInterval] = []
 
     public init() {}
 
     public var isEmpty: Bool {
         title == nil && due == nil && completed == nil && addAlarms.isEmpty && removeAlarms.isEmpty
+            && addAlarmOffsets.isEmpty && removeAlarmOffsets.isEmpty
     }
 }
 
@@ -204,7 +211,7 @@ public struct AppleSyncConfig: Codable, Equatable, Sendable {
     public var importListIDs: [String] = []
     /// Also mirror reminders that come from Canvas, 课堂派 and watched pages.
     public var includeWebsiteItems: Bool = true
-    /// Give the copies in Apple's Reminders the same alarms this app rings (1 day ahead … the due time), so the iPhone rings too.
+    /// Give the copies in Apple's Reminders an alarm at the due time, so the iPhone rings too.
     public var alarms: Bool = true
     /// The default list was considered for import the first time the link was switched on.
     public var defaultListOffered: Bool = false

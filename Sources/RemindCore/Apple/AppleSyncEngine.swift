@@ -14,6 +14,15 @@ public enum AppleSyncEngine {
     /// The default list is brought along when the link is first switched on only if it has at most this many open reminders.
     public static let defaultImportLimit = 30
 
+    /// The fixed-moment alarms that version 1.2 wrote ahead of the deadline (1 day, 3 hours, 30 and 3 minutes). Reminders takes
+    /// the earliest alarm of a reminder for its time, so they made a copy look as if it were due earlier: they are taken away
+    /// from the copies this app made.
+    static let retiredAlarmLeads: [TimeInterval] = [86_400, 10_800, 1_800, 180]
+
+    /// Likewise the relative alarm (one hour ahead of the deadline) that a build after 1.2 tried: it made every copy look an hour
+    /// early. It is not Reminders' own early reminder, which an app cannot set.
+    static let retiredAlarmOffsets: [TimeInterval] = [-3_600]
+
     public struct Options {
         public var managedListID: String
         public var importListIDs: [String]
@@ -230,29 +239,40 @@ public enum AppleSyncEngine {
             case .keep: break
             }
 
-            // Copies this app made carry the same alarms as the app itself (when switched on), so the iPhone rings ahead of the
-            // deadline and at it. The alarms follow the deadline only while both sides agree on it; a deadline edited on a
-            // website copy is left alone.
-            if link.origin == .app, finalDue == DueSpec(date: newSynced.due, hasTime: newSynced.hasTime) {
+            // Copies this app made carry one alarm, at the deadline (when switched on), so the iPhone rings too. It follows the
+            // deadline only while both sides agree on it; a deadline edited on a website copy is left alone. An alarm that has gone
+            // off is left as it is. Anything ahead of the deadline stays off the copy: Reminders would show it as the time.
+            if link.origin == .app {
+                let agreed = finalDue == DueSpec(date: newSynced.due, hasTime: newSynced.hasTime)
                 let completedAfter = change.completed ?? apple.fields.completed
-                // Every moment the schedule gives for the deadline; the ones that have gone by are left as they are.
-                var wanted: [Date] = []
-                if o.alarms, finalDue.hasTime, !completedAfter, let d = finalDue.date { wanted = alarmMoments(due: d, leads: r.leadTimes) }
-                // Alarms of an earlier deadline, and the alarms of a deadline that no longer needs any, are taken away.
-                var outdated: [Date] = []
-                for spec in [base.dueSpec, apple.fields.dueSpec, finalDue] where spec.hasTime {
+                let wanted = agreed && o.alarms && finalDue.hasTime && !completedAfter
+                // The one fixed-moment alarm that stays; every other one of ours is taken away.
+                let keep: Date? = wanted ? finalDue.date : nil
+                var taken: [Date] = []
+                func take(_ moment: Date) {
+                    guard !(keep.map { sameMinute($0, moment) } ?? false),
+                          !taken.contains(where: { sameMinute($0, moment) }),
+                          apple.alarmDates.contains(where: { sameMinute($0, moment) }) else { return }
+                    taken.append(moment)
+                }
+                // What earlier versions wrote ahead of the deadline goes, whatever the deadline.
+                for spec in [base.dueSpec, apple.fields.dueSpec, local.dueSpec, finalDue] where spec.hasTime {
                     guard let d = spec.date else { continue }
-                    for moment in alarmMoments(due: d, leads: r.leadTimes) {
-                        guard !wanted.contains(where: { sameMinute($0, moment) }),
-                              !outdated.contains(where: { sameMinute($0, moment) }),
-                              apple.alarmDates.contains(where: { sameMinute($0, moment) }) else { continue }
-                        outdated.append(moment)
+                    for lead in retiredAlarmLeads { take(d.addingTimeInterval(-lead)) }
+                }
+                for offset in retiredAlarmOffsets where apple.alarmOffsets.contains(where: { abs($0 - offset) < 1 }) {
+                    change.removeAlarmOffsets.append(offset)
+                }
+                if agreed {
+                    // Alarms of an earlier deadline, and the alarm of a deadline that no longer needs one, are taken away.
+                    for spec in [base.dueSpec, apple.fields.dueSpec, finalDue] where spec.hasTime {
+                        if let d = spec.date { take(d) }
+                    }
+                    if wanted, let d = finalDue.date, d > o.now, !apple.alarmDates.contains(where: { sameMinute($0, d) }) {
+                        change.addAlarms.append(d)
                     }
                 }
-                change.removeAlarms.append(contentsOf: outdated)
-                change.addAlarms = wanted.filter { moment in
-                    moment > o.now && !apple.alarmDates.contains(where: { sameMinute($0, moment) })
-                }
+                change.removeAlarms.append(contentsOf: taken)
             }
 
             if !change.isEmpty {
@@ -329,7 +349,7 @@ public enum AppleSyncEngine {
                 continue
             }
             var alarms: [Date] = []
-            if o.alarms, want.hasTime, let d = want.due { alarms = alarmMoments(due: d, leads: r.leadTimes).filter { $0 > o.now } }
+            if o.alarms, want.hasTime, let d = want.due, d > o.now { alarms = [d] }
             let new = AppleNewItem(fields: want, notes: notes(for: r), url: r.source == .manual || r.source == .apple ? nil : r.url,
                                    alarms: alarms)
             do {
@@ -406,17 +426,6 @@ public enum AppleSyncEngine {
 
     static func sameMinute(_ a: Date, _ b: Date) -> Bool {
         Int(a.timeIntervalSince1970 / 60) == Int(b.timeIntervalSince1970 / 60)
-    }
-
-    /// When the alarms of a copy with this deadline go off: one for each alert of the reminder, from the earliest to the
-    /// deadline itself.
-    static func alarmMoments(due: Date, leads: [Double]) -> [Date] {
-        var moments: [Date] = []
-        for lead in Set(leads).sorted(by: >) where lead >= 0 {
-            let moment = due.addingTimeInterval(-lead)
-            if !moments.contains(where: { sameMinute($0, moment) }) { moments.append(moment) }
-        }
-        return moments
     }
 
     /// The note written under the title of a website item's Apple copy.

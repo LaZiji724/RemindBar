@@ -100,6 +100,8 @@ public final class InMemoryAppleStore: AppleReminderStore {
         }
         item.alarmDates.removeAll { alarm in change.removeAlarms.contains { sameMinute($0, alarm) } }
         for alarm in change.addAlarms where !item.alarmDates.contains(where: { sameMinute($0, alarm) }) { item.alarmDates.append(alarm) }
+        item.alarmOffsets.removeAll { offset in change.removeAlarmOffsets.contains { abs($0 - offset) < 1 } }
+        for offset in change.addAlarmOffsets where !item.alarmOffsets.contains(where: { abs($0 - offset) < 1 }) { item.alarmOffsets.append(offset) }
         item.fields = f
         item.modifiedAt = clock()
         items[id] = item

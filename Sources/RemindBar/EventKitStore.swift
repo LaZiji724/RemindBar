@@ -123,7 +123,9 @@ final class EventKitStore: AppleReminderStore {
         let fields = AppleFields(title: r.title ?? "", due: due, hasTime: hasTime, completed: r.isCompleted, calendar: calendar)
         return AppleItem(id: r.calendarItemIdentifier, externalID: r.calendarItemExternalIdentifier, listID: r.calendar?.calendarIdentifier ?? "",
                          fields: fields, completedAt: r.completionDate, hasRecurrence: r.hasRecurrenceRules,
-                         alarmDates: (r.alarms ?? []).compactMap(\.absoluteDate), notes: r.notes, url: r.url?.absoluteString,
+                         alarmDates: (r.alarms ?? []).compactMap(\.absoluteDate),
+                         alarmOffsets: (r.alarms ?? []).filter { $0.absoluteDate == nil && $0.structuredLocation == nil }.map(\.relativeOffset),
+                         notes: r.notes, url: r.url?.absoluteString,
                          modifiedAt: r.lastModifiedDate)
     }
 
@@ -160,7 +162,14 @@ final class EventKitStore: AppleReminderStore {
                 }
             }
         }
+        for old in change.removeAlarmOffsets {
+            for alarm in reminder.alarms ?? [] where alarm.absoluteDate == nil && alarm.structuredLocation == nil
+                && abs(alarm.relativeOffset - old) < 1 {
+                reminder.removeAlarm(alarm)
+            }
+        }
         for alarm in change.addAlarms { reminder.addAlarm(EKAlarm(absoluteDate: alarm)) }
+        for offset in change.addAlarmOffsets { reminder.addAlarm(EKAlarm(relativeOffset: offset)) }
         try store.save(reminder, commit: true)
         return Self.convert(reminder, calendar: calendar)
     }
