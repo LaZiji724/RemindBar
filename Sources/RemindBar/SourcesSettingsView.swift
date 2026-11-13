@@ -56,7 +56,7 @@ struct SourcesSettings: View {
             } header: {
                 Text("添加")
             } footer: {
-                Text("点“连接”会打开一个登录窗口，请你自己登录（账号密码、验证码、扫码都行）；提醒条不会看到也不会保存你的密码。只读取作业和截止时间，不会替你提交或勾选任何东西。")
+                Text("点“连接”会打开一个登录窗口，请你自己登录（账号密码、验证码、扫码都行）；提醒条不会看到也不会保存你的密码。想让它掉线时自动登录，可以在上面的网站下点“保存账号…”（可选，只存钥匙串）。只读取作业和截止时间，不会替你提交或勾选任何东西。")
             }
 
             Section {
@@ -79,7 +79,7 @@ struct SourcesSettings: View {
                     Text("2 小时").tag(120)
                 }
             } footer: {
-                Text("读取这些网站不消耗任何 AI token。来自 Canvas、课堂派的待办没有手动“完成”：是否完成以网站为准，面板上方的刷新按钮每次都会去网站重新读取并核对。登录过期时只提醒一次，不会反复重试。")
+                Text("读取这些网站不消耗任何 AI token。来自 Canvas、课堂派的待办没有手动“完成”：是否完成以网站为准，面板上方的刷新按钮每次都会去网站重新读取并核对。登录过期时：保存了账号的网站会先自动登录一次，不成功或没保存账号就只提醒一次，不会反复重试。")
             }
         }
         .formStyle(.grouped)
@@ -105,7 +105,10 @@ private struct WatcherRow: View {
     @ObservedObject var sources: SourceCoordinator
     let watcher: WatcherConfig
 
+    @State private var editingLogin = false
+
     private var busy: Bool { sources.syncing.contains(watcher.id) }
+    private var supportsAutoLogin: Bool { watcher.kind == .canvas || watcher.kind == .ketangpai }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -122,6 +125,9 @@ private struct WatcherRow: View {
             Text(statusLine)
                 .font(.footnote)
                 .foregroundStyle(watcher.needsLogin ? Color.red : Color.secondary)
+            if supportsAutoLogin {
+                autoLoginLine
+            }
             HStack {
                 Button("立即同步") { Task { await sources.sync(watcherID: watcher.id, userInitiated: true) } }
                     .disabled(busy || watcher.needsLogin)
@@ -132,6 +138,36 @@ private struct WatcherRow: View {
             .controlSize(.small)
         }
         .padding(.vertical, 2)
+        .sheet(isPresented: $editingLogin) {
+            SavedLoginSheet(siteName: watcher.name, username: sources.savedUsername(for: watcher) ?? "") { login in
+                sources.saveLogin(login, watcherID: watcher.id)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var autoLoginLine: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "key.fill").font(.system(size: 10)).foregroundStyle(.secondary)
+            if let name = sources.savedUsername(for: watcher) {
+                if sources.autoLoginRejected(for: watcher) {
+                    Text("自动登录已停用：网站说账号或密码不对，请重新保存").foregroundStyle(.orange)
+                } else if sources.autoLoggingIn.contains(watcher.id) {
+                    Text("正在用 \(name) 自动登录…").foregroundStyle(.secondary)
+                } else {
+                    Text("掉线时自动用 \(name) 登录").foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("修改…") { editingLogin = true }
+                Button("删除账号") { sources.deleteLogin(watcherID: watcher.id) }
+            } else {
+                Text("自动登录：未开启").foregroundStyle(.secondary)
+                Spacer()
+                Button("保存账号…") { editingLogin = true }
+            }
+        }
+        .font(.footnote)
+        .controlSize(.small)
     }
 
     private var statusLine: String {
@@ -142,5 +178,56 @@ private struct WatcherRow: View {
         }
         if !watcher.enabled { parts.append("已暂停") }
         return parts.isEmpty ? "尚未同步" : parts.joined(separator: " · ")
+    }
+}
+
+/// Asks for the account and password used to log in again by itself. The password field always starts empty: a saved
+/// password is never read back into the window.
+private struct SavedLoginSheet: View {
+    let siteName: String
+    @State var username: String
+    let onSave: (SavedLogin) -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var password = ""
+    @State private var failed = false
+
+    init(siteName: String, username: String, onSave: @escaping (SavedLogin) -> Bool) {
+        self.siteName = siteName
+        _username = State(initialValue: username)
+        self.onSave = onSave
+    }
+
+    private var login: SavedLogin {
+        SavedLogin(username: username.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("“\(siteName)”掉线时自动登录").font(.headline)
+            Form {
+                TextField("账号（学号 / 手机号）", text: $username)
+                SecureField("密码", text: $password)
+            }
+            .formStyle(.grouped)
+            Text("账号和密码只存在这台 Mac 的钥匙串里，不写进任何文件，也不会发给除这个网站以外的地方。登录过期时，提醒条在后台打开网站的登录页，替你填好账号密码并点“登录”。登录页上的“同意用户协议”会替你勾上；遇到验证码、滑块、扫码或短信验证时，它会停下来通知你手动登录；网站说密码不对时会立刻停用自动登录，避免账号被锁。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if failed {
+                Text("没能写进钥匙串，请再试一次。").font(.footnote).foregroundStyle(.orange)
+            }
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("保存") {
+                    if onSave(login) { dismiss() } else { failed = true }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!login.isComplete)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
     }
 }

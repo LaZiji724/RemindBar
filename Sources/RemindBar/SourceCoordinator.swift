@@ -19,6 +19,10 @@ final class SourceCoordinator: ObservableObject {
     private var login: LoginWindowController?
     private var failures: [String: Int] = [:]
     private var nextAttempt: [String: Date] = [:]
+    /// Rules for logging in by itself with a saved account (one try per expiry, cooldown, stop on a wrong password).
+    private var autoLogin = AutoLoginPolicy(rejected: SavedLoginStore.rejectedSites)
+    /// Sites whose automatic login is running right now.
+    @Published private(set) var autoLoggingIn: Set<String> = []
 
     init(model: AppModel) {
         self.model = model
@@ -90,6 +94,8 @@ final class SourceCoordinator: ObservableObject {
             guard let self else { return }
             self.login = nil
             guard success else { return }
+            // A manual login proves the site works again: automatic login may try again next time it expires.
+            self.resetAutoLogin(siteKey: SavedLogin.siteKey(kind: watcher.kind, url: watcher.url))
             self.updateWatcher(watcherID) { $0.needsLogin = false; $0.lastStatus = "已登录，正在同步…" }
             Task {
                 await WebSession.shared.persistSessionCookies(domainSuffix: self.cookieDomain(for: watcher))
@@ -224,6 +230,91 @@ final class SourceCoordinator: ObservableObject {
         syncing.insert(watcherID)
         defer { syncing.remove(watcherID) }
 
+        // If the session turns out to be expired and an account is saved, the app logs in by itself once and reads
+        // again; the "please log in" notification then only goes out if that fails. Otherwise nothing changes.
+        let siteKey = SavedLogin.siteKey(kind: watcher.kind, url: watcher.url)
+        let canAutoLogin = (watcher.kind == .canvas || watcher.kind == .ketangpai)
+            && autoLogin.mayTry(siteKey: siteKey, hasSavedLogin: SavedLoginStore.username(siteKey: siteKey) != nil, now: Date())
+        let first = await syncOnce(watcher, userInitiated: userInitiated, notifyExpiry: !canAutoLogin)
+        guard first == .needsLogin, canAutoLogin else { return first }
+        let outcome = await performAutoLogin(watcher, siteKey: siteKey)
+        guard outcome == .success, let fresh = model.watchers.first(where: { $0.id == watcherID }) else {
+            updateWatcher(watcherID) { $0.lastStatus = outcome.message }
+            let wasWorking = watcher.initialSyncDone && !watcher.needsLogin
+            if wasWorking {
+                NotificationBridge.shared.post(title: "\(watcher.name) 需要重新登录",
+                                               body: outcome.message + "。点开提醒条的设置，在“监控源”里重新登录。")
+            }
+            return first
+        }
+        let retried = await syncOnce(fresh, userInitiated: userInitiated, notifyExpiry: true)
+        if case .synced = retried {
+            updateWatcher(watcherID) { $0.lastStatus = "已自动重新登录 · " + ($0.lastStatus ?? "") }
+        }
+        return retried
+    }
+
+    /// Runs the hidden login with the saved account and records the result for the retry rules.
+    private func performAutoLogin(_ watcher: WatcherConfig, siteKey: String) async -> AutoLoginOutcome {
+        guard let url = loginURL(for: watcher), let check = loginCheck(for: watcher) else {
+            return .failed("暂不支持这个站点")
+        }
+        // Read from the keychain only now, when it is really needed.
+        guard let saved = SavedLoginStore.load(siteKey: siteKey) else { return .failed("钥匙串里没有读到保存的账号") }
+        autoLoggingIn.insert(watcher.id)
+        defer { autoLoggingIn.remove(watcher.id) }
+        updateWatcher(watcher.id) { $0.lastStatus = "登录已过期，正在自动重新登录…" }
+        let outcome = await AutoLoginRunner().run(loginURL: url, login: saved, check: check)
+        autoLogin.record(outcome, siteKey: siteKey, now: Date())
+        SavedLoginStore.rejectedSites = autoLogin.rejected
+        if outcome == .success {
+            updateWatcher(watcher.id) { $0.needsLogin = false }
+            await WebSession.shared.persistSessionCookies(domainSuffix: cookieDomain(for: watcher))
+        }
+        return outcome
+    }
+
+    // MARK: saved accounts
+
+    func savedUsername(for watcher: WatcherConfig) -> String? {
+        SavedLoginStore.username(siteKey: SavedLogin.siteKey(kind: watcher.kind, url: watcher.url))
+    }
+
+    /// True when the site rejected the saved password and automatic login is off until the account is saved again.
+    func autoLoginRejected(for watcher: WatcherConfig) -> Bool {
+        autoLogin.rejected.contains(SavedLogin.siteKey(kind: watcher.kind, url: watcher.url))
+    }
+
+    /// Saves (replaces) the account for a site. If the site is waiting for a login, tries it right away.
+    @discardableResult
+    func saveLogin(_ login: SavedLogin, watcherID: String) -> Bool {
+        guard let watcher = model.watchers.first(where: { $0.id == watcherID }) else { return false }
+        let siteKey = SavedLogin.siteKey(kind: watcher.kind, url: watcher.url)
+        guard SavedLoginStore.save(login, siteKey: siteKey) else { return false }
+        resetAutoLogin(siteKey: siteKey)
+        objectWillChange.send()
+        if watcher.needsLogin {
+            Task { await sync(watcherID: watcherID, userInitiated: true) }
+        }
+        return true
+    }
+
+    func deleteLogin(watcherID: String) {
+        guard let watcher = model.watchers.first(where: { $0.id == watcherID }) else { return }
+        let siteKey = SavedLogin.siteKey(kind: watcher.kind, url: watcher.url)
+        SavedLoginStore.delete(siteKey: siteKey)
+        resetAutoLogin(siteKey: siteKey)
+        objectWillChange.send()
+    }
+
+    private func resetAutoLogin(siteKey: String) {
+        autoLogin.reset(siteKey: siteKey)
+        SavedLoginStore.rejectedSites = autoLogin.rejected
+    }
+
+    /// One read of the site, with the usual error handling.
+    private func syncOnce(_ watcher: WatcherConfig, userInitiated: Bool, notifyExpiry: Bool) async -> SyncOutcome {
+        let watcherID = watcher.id
         do {
             let summary: SyncSummary
             if watcher.kind == .web {
@@ -244,9 +335,9 @@ final class SourceCoordinator: ObservableObject {
             await WebSession.shared.persistSessionCookies(domainSuffix: cookieDomain(for: watcher))
             return .synced(summary)
         } catch let error as SourceError {
-            return handle(error, watcher: watcher)
+            return handle(error, watcher: watcher, notifyExpiry: notifyExpiry)
         } catch {
-            return handle(.script(error.localizedDescription), watcher: watcher)
+            return handle(.script(error.localizedDescription), watcher: watcher, notifyExpiry: notifyExpiry)
         }
     }
 
@@ -280,15 +371,16 @@ final class SourceCoordinator: ObservableObject {
     }
 
     @discardableResult
-    private func handle(_ error: SourceError, watcher: WatcherConfig) -> SyncOutcome {
+    private func handle(_ error: SourceError, watcher: WatcherConfig, notifyExpiry: Bool = true) -> SyncOutcome {
         if error == .notLoggedIn {
             let wasWorking = watcher.initialSyncDone && !watcher.needsLogin
             updateWatcher(watcher.id) {
                 $0.needsLogin = true
                 $0.lastStatus = watcher.initialSyncDone ? "登录已过期，需要重新登录" : "尚未登录"
             }
-            // One notification per expiry, never a loop, and none for a site that was never logged in.
-            if wasWorking {
+            // One notification per expiry, never a loop, and none for a site that was never logged in. When an automatic
+            // login is about to be tried, the notification waits for its result.
+            if wasWorking && notifyExpiry {
                 NotificationBridge.shared.post(title: "\(watcher.name) 需要重新登录", body: "点开提醒条的设置，在“监控源”里重新登录。")
             }
             return .needsLogin
@@ -310,6 +402,17 @@ final class SourceCoordinator: ObservableObject {
     }
 
     func remove(watcherID: String) {
+        // Removing a site also forgets its saved account, unless another entry still uses the same site.
+        if let watcher = model.watchers.first(where: { $0.id == watcherID }) {
+            let siteKey = SavedLogin.siteKey(kind: watcher.kind, url: watcher.url)
+            let shared = model.watchers.contains {
+                $0.id != watcherID && SavedLogin.siteKey(kind: $0.kind, url: $0.url) == siteKey
+            }
+            if !shared {
+                SavedLoginStore.delete(siteKey: siteKey)
+                resetAutoLogin(siteKey: siteKey)
+            }
+        }
         model.setWatchers(model.watchers.filter { $0.id != watcherID })
     }
 
