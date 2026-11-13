@@ -46,6 +46,7 @@ ShapeTests.run(harness)
 RedactorTests.run(harness)
 CompletionRuleTests.run(harness)
 IgnoreTests.run(harness)
+AutoLoginTests.run(harness)
 await AppleSyncTests.run(harness)
 await WebWatchTests.run(harness)
 if arguments.contains("--live") { await LiveTests.run(harness) }
