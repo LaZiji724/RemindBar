@@ -285,7 +285,7 @@ enum AITests {
         h.equal(l.calls(on: day, sourceID: "a"), 2, "calls per source per day")
         h.equal(l.calls(on: day, sourceID: "b"), 0, "unknown source")
         // 800 hit * 0.04 + 200 miss * 2 + 100 out * 8 = 32 + 400 + 800 per million
-        let expected = (800 * 0.04 + 200 * 2.0 + 100 * 8.0) / 1_000_000
+        let expected: Double = (800 * 0.04 + 200 * 2.0 + 100 * 8.0) / 1_000_000
         h.check(abs(usage.estimatedCost - expected) < 1e-12, "cost estimate uses the flash price table", "\(usage.estimatedCost)")
         l.openBreaker(reason: "测试")
         h.equal(l.breakerReason, "测试", "breaker reason")

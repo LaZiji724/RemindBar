@@ -210,7 +210,7 @@ private struct SavedLoginSheet: View {
                 SecureField("密码", text: $password)
             }
             .formStyle(.grouped)
-            Text("账号和密码只存在这台 Mac 的钥匙串里，不写进任何文件，也不会发给除这个网站以外的地方。登录过期时，提醒条在后台打开网站的登录页，替你填好账号密码并点“登录”。遇到验证码、滑块、扫码、短信验证或需要勾选协议时，它会停下来通知你手动登录；网站说密码不对时会立刻停用自动登录，避免账号被锁。")
+            Text("账号和密码只存在这台 Mac 的钥匙串里，不写进任何文件，也不会发给除这个网站以外的地方。登录过期时，提醒条在后台打开网站的登录页，替你填好账号密码并点“登录”。登录页上的“同意用户协议”会替你勾上；遇到验证码、滑块、扫码或短信验证时，它会停下来通知你手动登录；网站说密码不对时会立刻停用自动登录，避免账号被锁。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

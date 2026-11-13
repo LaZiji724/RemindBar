@@ -48,7 +48,8 @@ enum SavedLoginStore {
 
 /// Logs in by itself in a hidden web view that shares the app's WebKit store, so a successful login renews exactly the
 /// session the sources read from. It types the saved account into the site's own login page and presses its login
-/// button, nothing else: captchas, sliders, QR codes, SMS codes and agreement boxes stop it and are left to the user.
+/// button (ticking the form's user-agreement box if there is one): captchas, sliders, QR codes and SMS codes stop it
+/// and are left to the user.
 @MainActor
 final class AutoLoginRunner {
     private static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"

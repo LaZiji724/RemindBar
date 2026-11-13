@@ -121,8 +121,8 @@ public struct AutoLoginPolicy: Equatable, Sendable {
 
 /// The scripts run inside the site's own login page. The account and password are passed as `callAsyncJavaScript`
 /// arguments (`username`, `password`), never pasted into the script text, so no quoting can break or leak them.
-/// The scripts only type into the login form and press its login button: they never tick an agreement box, never
-/// touch a captcha or slider, and never follow any other link.
+/// The scripts only type into the login form, tick the form's own user-agreement box (the user asked for that), and
+/// press its login button: they never touch a captcha or slider and never follow any other link.
 public enum AutoLoginScript {
     /// Shared helpers: visibility, challenge detection and error detection.
     static let prelude = """
@@ -203,12 +203,22 @@ public enum AutoLoginScript {
     setValue(user, String(username));
     setValue(pwd, String(password));
 
-    // An unticked agreement box is the user's to tick; the app never agrees to anything on their behalf.
+    // The login page's "I have read and agree to the user agreement" box: the user chose to have it ticked for them
+    // (they accepted it when they signed up). Only boxes whose own label is about the agreement; nothing else.
+    const agreementWords = /协议|同意|阅读|条款|隐私/;
+    const agreementLabel = (el) => textOf(el.closest('label') || el.parentElement);
     for (const box of scope.querySelectorAll('input[type="checkbox"]')) {
-      const label = textOf(box.closest('label') || box.parentElement);
-      if (/协议|同意|阅读|条款|隐私/.test(label) && !box.checked) {
-        return answer('needsHuman', '登录页要求勾选用户协议');
+      if (box.checked || !agreementWords.test(agreementLabel(box))) { continue; }
+      // Click what the user would click (the visible box or its label) so the page's own handlers run.
+      const target = visible(box) ? box : (box.closest('label') || box.parentElement);
+      target.click();
+      if (!box.checked) {
+        box.checked = true;
+        box.dispatchEvent(new Event('change', {bubbles: true}));
       }
+    }
+    for (const box of scope.querySelectorAll('[role="checkbox"][aria-checked="false"]')) {
+      if (visible(box) && agreementWords.test(agreementLabel(box))) { box.click(); }
     }
 
     const loginWords = /^(登\\s*录|立即登录|登录\\s*\\/\\s*注册|log\\s*in|sign\\s*in)$/i;

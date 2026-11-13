@@ -31,8 +31,8 @@ enum AutoLoginTests {
         // The scripts take the account as arguments and never contain a value.
         for (name, script) in [("fill", AutoLoginScript.fill), ("inspect", AutoLoginScript.inspect)] {
             h.check(!script.contains("s3cr3t") && !script.contains("2350001"), "\(name) script holds no account data")
-            h.check(!script.contains("checked = true") && !script.contains(".checked=true"), "\(name) script never ticks a box")
         }
+        h.check(!AutoLoginScript.inspect.contains("click()"), "inspect script only looks, never clicks")
         h.check(AutoLoginScript.fill.contains("String(username)") && AutoLoginScript.fill.contains("String(password)"),
                 "fill script reads the callAsyncJavaScript arguments")
         h.check(!AutoLoginScript.inspect.contains("password)"), "inspect script never touches the password")
