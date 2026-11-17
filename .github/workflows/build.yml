@@ -4,7 +4,6 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ['v*']
   workflow_dispatch:
 
 jobs:
@@ -30,11 +29,29 @@ jobs:
           name: RemindBar-macOS
           path: dist/RemindBar-macOS.zip
           retention-days: 14
-      - name: 发布安装包到 Release（只在打版本标签时）
-        if: startsWith(github.ref, 'refs/tags/v')
+      # 仓库开了“不可变发布”：发布一旦公开就不能再加文件。所以安装包必须先传到草稿发布里，再公开。
+      # main 上的版本号（Tools/package_app.sh 里的 CFBundleShortVersionString）还没有对应的发布时，自动发布一次。
+      - name: 发布新版本（main 上版本号变了时）
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp dist/RemindBar-macOS.zip "dist/RemindBar-${GITHUB_REF_NAME}-macOS.zip"
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "提醒条 $GITHUB_REF_NAME" --notes ""
-          gh release upload "$GITHUB_REF_NAME" "dist/RemindBar-${GITHUB_REF_NAME}-macOS.zip" --clobber
+          VERSION=$(sed -n 's:.*<key>CFBundleShortVersionString</key><string>\([^<]*\)</string>.*:\1:p' Tools/package_app.sh)
+          TAG="v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1 || git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "$TAG 已经发布过，跳过。"
+            exit 0
+          fi
+          ASSET="dist/RemindBar-$TAG-macOS.zip"
+          cp dist/RemindBar-macOS.zip "$ASSET"
+          {
+            echo "# 提醒条 $TAG"
+            echo
+            grep -F -- "- **$TAG**" README.md | sed 's/^- //' || true
+            echo
+            echo "## 安装"
+            echo
+            echo "下载 \`RemindBar-$TAG-macOS.zip\`，解压后把“提醒条”拖进“应用程序”（覆盖旧版即可，提醒和设置都会保留）。本机临时签名、没有经过苹果公证，第一次打开请右键 › 打开。"
+          } > dist/release-notes.md
+          gh release create "$TAG" "$ASSET" --draft --target "$GITHUB_SHA" --title "提醒条 $TAG" --notes-file dist/release-notes.md
+          gh release edit "$TAG" --draft=false --latest
