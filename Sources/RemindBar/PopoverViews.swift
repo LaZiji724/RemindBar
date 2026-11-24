@@ -192,25 +192,34 @@ private struct AppleInviteBanner: View {
 
 private struct InputBar: View {
     @ObservedObject var model: AppModel
-    @FocusState private var focused: Bool
 
     private var listening: Bool { model.voiceState == .listening }
+    /// Height of the round buttons; the box is at least this tall and grows from there (up to 5 lines, then scrolls).
+    private let rowHeight = InputScrollView.rowHeight
 
     var body: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 8) {
-                HStack(spacing: 6) {
+            // Buttons sit at the bottom edge, so they stay beside the last line while the box grows.
+            HStack(alignment: .bottom, spacing: 8) {
+                HStack(alignment: .bottom, spacing: 6) {
                     Image(systemName: "plus.circle.fill")
                         .foregroundStyle(.secondary)
                         .font(.system(size: 15))
-                    TextField(listening ? "正在听你说…" : "输入或口述提醒，例如：去睡觉，今晚19点", text: $model.input)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .focused($focused)
-                        .onSubmit { model.commitInput() }
+                        .frame(height: rowHeight)
+                    GrowingTextInput(
+                        text: $model.input,
+                        placeholder: listening ? "正在听你说…" : "输入或口述提醒，例如：去睡觉，今晚19点",
+                        focusToken: model.focusRequest,
+                        maxLines: 5,
+                        onSubmit: { model.commitInput() }
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, InputScrollView.verticalPadding)
                     if !model.input.isEmpty && !listening {
                         Button { model.input = "" } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.tertiary)
+                                .frame(height: rowHeight)
                         }
                         .buttonStyle(.plain)
                         .help("清空")
@@ -225,18 +234,17 @@ private struct InputBar: View {
                 Button { model.commitInput() } label: {
                     Image(systemName: "return")
                         .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 28, height: 28)
+                        .frame(width: rowHeight, height: rowHeight)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
                 .disabled(model.intent == .empty)
-                .help("添加（回车）")
+                .help("添加（回车）；Shift+回车换行")
+                .padding(.bottom, 6)
             }
             VoiceStatusLine(model: model)
         }
         .padding(.horizontal, 14)
-        .onChange(of: model.focusRequest) { _, _ in focused = true }
-        .onAppear { focused = true }
     }
 }
 

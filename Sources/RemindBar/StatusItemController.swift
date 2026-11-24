@@ -36,10 +36,18 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] _, _ in self?.refreshAppearance() }
             .store(in: &cancellables)
+        // Esc typed in the input box that no input method used (it was not composing).
+        NotificationCenter.default.publisher(for: .inputBoxDidCancel)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.hide(reason: "Esc in the input box") }
+            .store(in: &cancellables)
         refreshAppearance()
     }
 
     var isShown: Bool { popover.isShown }
+
+    /// The panel's window (nil while it was never shown).
+    var panelWindow: NSWindow? { popover.contentViewController?.view.window }
 
     /// Performs the same action a mouse click on the menu bar icon would.
     func simulateClick() {
@@ -82,7 +90,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         if NSApp.currentEvent?.type == .rightMouseUp {
             showContextMenu()
         } else if popover.isShown {
-            hide()
+            hide(reason: "click on the status item")
         } else {
             show(activate: true)
         }
@@ -102,17 +110,24 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         if let seconds {
             let work = DispatchWorkItem { [weak self] in
                 guard let self, self.popover.isShown, !self.mouseIsInsidePopover() else { return }
-                self.hide()
+                self.hide(reason: "auto-close timer")
             }
             autoClose = work
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
         }
     }
 
-    func hide() {
+    /// Why the panel was closed last time (the self-test reports it when the panel closes when it should not).
+    private(set) var lastHideReason = ""
+
+    func hide(reason: String = "hide()") {
+        lastHideReason = reason
         autoClose?.cancel()
         popover.close()
     }
+
+    /// The pointer is over the panel (which keeps an alert's auto-close from folding it away under the person's hand).
+    var mouseIsOverPanel: Bool { mouseIsInsidePopover() }
 
     private func mouseIsInsidePopover() -> Bool {
         guard let window = popover.contentViewController?.view.window else { return false }
@@ -164,21 +179,58 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         removeMonitors()
         // Clicks in other apps close the panel.
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            Task { @MainActor in self?.hide() }
+            Task { @MainActor in self?.clickInAnotherApp() }
         }
         // Clicks elsewhere in this app (e.g. the settings window) and Esc close it as well.
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
             guard let self else { return event }
             if event.type == .keyDown {
-                if event.keyCode == 53 { self.hide(); return nil }
+                if event.keyCode == 53 {
+                    // In the input box, Esc is first the input method's (it cancels a composition). The box tells us
+                    // through `.inputBoxDidCancel` when it was meant for the panel.
+                    if NSApp.keyWindow?.firstResponder is InputTextView { return event }
+                    self.hide(reason: "Esc")
+                    return nil
+                }
                 return event
             }
             let popoverWindow = self.popover.contentViewController?.view.window
             if event.window !== popoverWindow && event.window !== self.statusItem.button?.window {
-                self.hide()
+                self.hide(reason: "click elsewhere in this app")
             }
             return event
         }
+    }
+
+    /// A click that went to another process. Normally that means the person moved on, so the panel folds away. But while
+    /// typing here, clicking a candidate in the input method's list also lands in another process (the input method's
+    /// own window), and that must not close the panel. Such a window never takes over the keyboard from this app, so:
+    /// if this app was the active one and still is a moment later, nothing else was clicked "into". (Looking at the
+    /// windows under the pointer would answer it directly, but listing other apps' windows asks for the Screen Recording
+    /// permission, which this app must not ask for.)
+    private func clickInAnotherApp() {
+        handleOutsideClick(pointerInMenuBar: mouseIsInMenuBar())
+    }
+
+    /// (Separate from the monitor so the self-test can make the same decision without a real click.)
+    func handleOutsideClick(pointerInMenuBar: Bool) {
+        guard popover.isShown else { return }
+        if NSApp.isActive && !pointerInMenuBar {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                guard let self, self.popover.isShown, !NSApp.isActive else { return }
+                self.hide(reason: "click in another app (in front: \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"))")
+            }
+        } else {
+            hide(reason: "click in another app (in front: \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"))")
+        }
+    }
+
+    /// The menu bar (other apps' icons and menus) is never where an input method shows its candidates.
+    private func mouseIsInMenuBar() -> Bool {
+        let point = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) }) else { return false }
+        let bar = max(24, screen.frame.maxY - screen.visibleFrame.maxY)
+        return point.y >= screen.frame.maxY - bar
     }
 
     private func removeMonitors() {

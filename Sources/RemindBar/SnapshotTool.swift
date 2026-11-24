@@ -28,7 +28,10 @@ enum SnapshotTool {
             ("preview-ampm", "明天10点开会"),
             ("preview-multi", "明天上午九点开会，后天下午三点交作业"),
             ("preview-lowconf", "晚点提醒我"),
-            ("connect", "监控课堂派的新作业")
+            ("connect", "监控课堂派的新作业"),
+            // The input box grows with long text (3 lines here) and stops at 5 lines, scrolling beyond that.
+            ("long-3", "后天下午三点交数据库实验报告，别忘了带学生证，还要把电子版发给助教，周五之前"),
+            ("long-8", "明天上午九点开会，后天下午三点交作业，周五晚上七点半去图书馆还书，周六早上十点和同学打球，下周一上午八点半高等数学小测，下周二下午两点做实验，下周三晚上六点社团例会，下周四中午十二点取快递，下周五晚上八点看电影")
         ]
         for (appearanceName, appearance) in [("light", NSAppearance.Name.aqua), ("dark", NSAppearance.Name.darkAqua)] {
             for scene in scenes {

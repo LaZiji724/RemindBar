@@ -25,8 +25,39 @@ enum UISmokeTest {
             }
             return condition()
         }
+        let skipWeb = CommandLine.arguments.contains("--no-web")   // the steps that load Canvas / 课堂派 pages need a working network
+        /// Seconds since the person last clicked a mouse button.
+        func secondsSinceClick() -> Double {
+            min(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .leftMouseDown),
+                CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .rightMouseDown))
+        }
+        /// A click in another app folds the panel away by design (and takes the keyboard from it): someone using the Mac
+        /// while the test runs would spoil the checks that need the panel open, so those wait for a quiet mouse first.
+        func waitForQuietMouse(_ seconds: Double = 10, upTo limit: Double = 90) async {
+            var waited = 0.0
+            while waited < limit, secondsSinceClick() < seconds {
+                await pause(1)
+                waited += 1
+            }
+        }
         let shots = dataDir.appendingPathComponent("shots")
         try? FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        /// The end of the run (also used by the short `--input-only` run).
+        func finish() async {
+            // Leave nothing of this run in the system's notification centre (its alerts use their own prefix).
+            if NotificationBridge.shared.isAvailable {
+                let center = UNUserNotificationCenter.current()
+                let prefix = NotificationBridge.shared.prefix
+                let pending = await center.pendingNotificationRequests().map(\.identifier).filter { $0.hasPrefix(prefix) }
+                center.removePendingNotificationRequests(withIdentifiers: pending)
+                let delivered = await center.deliveredNotifications().map(\.request.identifier).filter { $0.hasPrefix(prefix) }
+                center.removeDeliveredNotifications(withIdentifiers: delivered)
+            }
+            lines.append("")
+            lines.append("RESULT: \(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")")
+            try? lines.joined(separator: "\n").write(toFile: outputPath, atomically: true, encoding: .utf8)
+            NSApp.terminate(nil)
+        }
 
         // 1. A click on the menu bar icon opens and closes the panel.
         check(!status.isShown, "panel starts closed")
@@ -64,6 +95,112 @@ enum UISmokeTest {
         check(saved?.reminders.contains { $0.title == "去睡觉" } == true, "the reminder is saved to disk")
         status.snapshot(to: shots.appendingPathComponent("3-added.png").path)
 
+        // 3b. The input box is an AppKit text view (so every input method, Apple's or third-party, works in it): it grows with
+        //     the text up to 5 lines and scrolls beyond that; Return adds, Shift+Return breaks the line, Esc folds the panel.
+        //     (Typing "through" an input method cannot be simulated from inside the app, so the input method's own calls
+        //     are made directly: setMarkedText for the letters being composed, insertText for the committed text.)
+        func findBox(_ view: NSView?) -> InputScrollView? {
+            guard let view else { return nil }
+            if let box = view as? InputScrollView { return box }
+            for sub in view.subviews { if let found = findBox(sub) { return found } }
+            return nil
+        }
+        func key(_ code: CGKeyCode, _ characters: String, flags: CGEventFlags = []) {
+            for down in [true, false] {
+                guard let cg = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down) else { continue }
+                cg.flags = flags
+                var units = Array(characters.utf16)
+                cg.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
+                if let event = NSEvent(cgEvent: cg) { NSApp.sendEvent(event) }
+            }
+        }
+        let anywhere = NSRange(location: NSNotFound, length: 0)
+        /// Where the keyboard is, for the checks that depend on key presses reaching the box.
+        func keyboardState() -> String {
+            "shown=\(status.isShown) appActive=\(NSApp.isActive) keyWindow=\(NSApp.keyWindow != nil) responder=\(NSApp.keyWindow?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") lastHide=\(status.lastHideReason) lastClick=\(Int(secondsSinceClick()))s"
+        }
+        await waitForQuietMouse()
+        status.show(activate: true)
+        _ = await until { status.isShown }
+        await pause(0.6)
+        if let box = findBox(status.panelWindow?.contentView) {
+            let text = box.textView
+            let line = InputScrollView.lineHeight
+            func lineCount() -> Double { Double(box.frame.height / line) }
+            check(NSApp.keyWindow?.firstResponder === text, "the input box has the keyboard focus when the panel opens")
+            check(abs(box.frame.height - line) < 1, "an empty box is one line tall", "\(box.frame.height) pt")
+            model.input = "后天下午三点交数据库实验报告，别忘了带学生证，还要把电子版发给助教，周五之前"
+            await pause(0.5)
+            check(text.string == model.input, "the box shows what the model holds")
+            let few = lineCount()
+            check(few >= 2 && few <= 5 && abs(few.rounded() - few) < 0.05, "a longer sentence makes the box taller, by whole lines", "\(few) lines")
+            model.input = String(repeating: "明天上午九点开会，后天下午三点交作业，", count: 8)
+            await pause(0.5)
+            check(abs(lineCount() - 5) < 0.05, "…but never more than 5 lines", "\(lineCount()) lines")
+            check(text.frame.height > box.frame.height + line / 2, "…beyond that the text scrolls inside the box", "text \(text.frame.height) pt in a box of \(box.frame.height) pt")
+            status.snapshot(to: shots.appendingPathComponent("3b-five-lines.png").path)
+            model.input = "去睡觉"
+            await pause(0.5)
+            check(abs(box.frame.height - line) < 1, "…and it shrinks back when the text is short again", "\(box.frame.height) pt")
+
+            // What an input method does: letters being composed, a redraw of the panel meanwhile, then the commit.
+            model.input = ""
+            await pause(0.3)
+            text.setMarkedText("ni hao", selectedRange: NSRange(location: 6, length: 0), replacementRange: anywhere)
+            check(text.hasMarkedText() && model.input == "ni hao", "while composing, the model follows what the box shows", model.input)
+            model.toast = "redraw"
+            await pause(0.4)
+            model.toast = nil
+            check(text.hasMarkedText() && text.string == "ni hao", "a redraw of the panel in the middle of a composition leaves the letters alone", text.string)
+            text.insertText("你好", replacementRange: anywhere)
+            check(!text.hasMarkedText() && model.input == "你好" && text.string == "你好", "committing replaces the letters by the Chinese text", model.input)
+            let long = "wo jin tian xia wu san dian yao qu tu shu guan huan shu ran hou qu shi tang chi fan"
+            text.setMarkedText(long, selectedRange: NSRange(location: long.count, length: 0), replacementRange: anywhere)
+            await pause(0.5)
+            check(text.hasMarkedText() && lineCount() >= 2, "a long composition makes the box grow while it is still being composed", "\(lineCount()) lines")
+            model.input = ""
+            await pause(0.4)
+            check(!text.hasMarkedText() && text.string.isEmpty && model.input.isEmpty, "clearing from outside drops a composition in progress", "「\(text.string)」 / 「\(model.input)」")
+            check(abs(box.frame.height - line) < 1, "…and the box is one line again", "\(box.frame.height) pt")
+
+            // Return adds; Shift+Return is a line break; Esc folds the panel away.
+            model.input = "去睡觉，明晚23点"
+            await pause(0.4)
+            let count = model.reminders.count
+            key(36, "\r")
+            await pause(0.5)
+            check(model.reminders.count == count + 1 && model.input.isEmpty && text.string.isEmpty, "Return in the box adds the reminder and empties the box", "\(model.reminders.count) vs \(count); \(keyboardState())")
+            text.insertText("a", replacementRange: anywhere)
+            key(36, "\r", flags: .maskShift)
+            text.insertText("b", replacementRange: anywhere)
+            await pause(0.3)
+            check(model.input == "a\nb" && model.reminders.count == count + 1, "Shift+Return breaks the line instead of adding", model.input.replacingOccurrences(of: "\n", with: "⏎") + "; " + keyboardState())
+            model.input = ""
+            await pause(0.3)
+            key(53, "\u{1B}")
+            check(await until { !status.isShown }, "Esc in the box (nothing being composed) folds the panel away")
+        } else {
+            check(false, "the panel has the input box")
+        }
+        // 3c. A click in another app folds the panel away, except one on a window that takes nothing over from this app (an
+        //     input method's candidate list: this app stays the active one). The check is made without a real click.
+        status.show(activate: true)
+        _ = await until { status.isShown }
+        await pause(0.6)
+        status.handleOutsideClick(pointerInMenuBar: false)
+        await pause(0.6)
+        check(NSApp.isActive && status.isShown, "a click that leaves this app the active one (a candidate window) does not close the panel", "active=\(NSApp.isActive) shown=\(status.isShown) \(status.lastHideReason)")
+        status.handleOutsideClick(pointerInMenuBar: true)
+        check(await until { !status.isShown }, "a click in the menu bar closes it")
+
+        if CommandLine.arguments.contains("--input-only") {
+            await finish()
+            return
+        }
+        status.show(activate: true)
+        _ = await until { status.isShown }
+        await pause(0.4)
+
         // 4. Voice button state machine reacts (no microphone is opened in this test).
         check(model.voiceState == .idle, "voice is idle")
 
@@ -76,6 +213,7 @@ enum UISmokeTest {
         }
 
         // 6. A reminder that comes due while the app runs pops the panel open and stays until dismissed.
+        await waitForQuietMouse(15)
         status.hide()
         _ = await until { !status.isShown }
         let soon = Reminder(title: "冒烟测试：到点提醒", due: Date().addingTimeInterval(3), leadTimes: [0])
@@ -84,7 +222,18 @@ enum UISmokeTest {
         check(model.highlightedID == soon.id, "the due reminder is highlighted")
         status.snapshot(to: shots.appendingPathComponent("4-due-alert.png").path)
         await pause(9)
-        check(status.isShown, "an alert at the deadline stays open")
+        // A click in another app folds the panel away by design. If someone did that while the test waited, raise the alert again.
+        var attempts = 1
+        while !status.isShown, status.lastHideReason.hasPrefix("click in another app"), secondsSinceClick() < 15, attempts < 3 {
+            attempts += 1
+            await waitForQuietMouse(10)
+            status.alert(fires: [Fire(reminderID: soon.id, at: Date(), lead: 0)], reminders: [soon])
+            _ = await until { status.isShown }
+            await pause(9)
+        }
+        check(status.isShown, "an alert at the deadline stays open",
+              status.isShown ? (attempts > 1 ? "attempt \(attempts): earlier ones were closed by someone clicking in another app" : "")
+                             : "closed by: \(status.lastHideReason); last click \(Int(secondsSinceClick())) s ago")
         status.hide()
         var closedAfter = -1.0
         for step in 1...30 {
@@ -97,7 +246,14 @@ enum UISmokeTest {
         let early = Reminder(title: "冒烟测试：提前提醒", due: Date().addingTimeInterval(130), isDeadline: true, leadTimes: [127])
         model.replaceReminders(model.reminders + [early])
         check(await until(8) { status.isShown }, "an early warning opens the panel")
-        check(await until(14) { !status.isShown }, "…and it closes by itself after ~8 s")
+        let folded = await until(14) { !status.isShown }
+        if !folded && status.mouseIsOverPanel {
+            // By design the panel stays while the pointer is over it (it must not fold away under the person's hand).
+            lines.append("SKIP …and it closes by itself after ~8 s  — the pointer is over the panel, which keeps it open")
+            status.hide(reason: "smoke test")
+        } else {
+            check(folded, "…and it closes by itself after ~8 s", folded ? "" : "still open; last close reason: \(status.lastHideReason)")
+        }
 
         // 8. Completing and deleting.
         model.complete(soon.id)
@@ -105,31 +261,34 @@ enum UISmokeTest {
         model.delete(early.id)
         check(!model.reminders.contains { $0.id == early.id }, "delete removes it")
 
-        // 9. "连接同济 Canvas" opens a real login window that loads the real Tongji sign-in page.
-        model.sources.connect(ConnectRequest(kind: .canvas, url: IntentRouter.canvasURL, hint: ""))
-        check(model.watchers.contains { $0.kind == .canvas && $0.name == "同济 Canvas" }, "connecting Canvas creates a watcher")
-        check(await until(5) { model.sources.activeLoginWebView != nil }, "the Canvas login window opens")
-        if let web = model.sources.activeLoginWebView {
-            let loaded = await until(30) { !web.isLoading && web.url != nil }
-            check(loaded, "the login page finishes loading", web.url?.absoluteString ?? "nil")
-            check(web.url?.host?.contains("tongji.edu.cn") == true, "it is a Tongji page (Canvas or the unified sign-in)", web.url?.host ?? "nil")
-        }
-        model.sources.closeLoginWindow()
-        check(model.sources.activeLoginWebView == nil, "closing the window releases it")
-        check(model.watchers.first { $0.kind == .canvas }?.needsLogin == false, "closing without logging in does not mark anything broken")
+        if !skipWeb {
+            // 9. "连接同济 Canvas" opens a real login window that loads the real Tongji sign-in page.
+            model.sources.connect(ConnectRequest(kind: .canvas, url: IntentRouter.canvasURL, hint: ""))
+            check(model.watchers.contains { $0.kind == .canvas && $0.name == "同济 Canvas" }, "connecting Canvas creates a watcher")
+            check(await until(5) { model.sources.activeLoginWebView != nil }, "the Canvas login window opens")
+            if let web = model.sources.activeLoginWebView {
+                let loaded = await until(30) { !web.isLoading && web.url != nil }
+                check(loaded, "the login page finishes loading", web.url?.absoluteString ?? "nil")
+                check(web.url?.host?.contains("tongji.edu.cn") == true, "it is a Tongji page (Canvas or the unified sign-in)", web.url?.host ?? "nil")
+            }
+            model.sources.closeLoginWindow()
+            check(model.sources.activeLoginWebView == nil, "closing the window releases it")
+            check(model.watchers.first { $0.kind == .canvas }?.needsLogin == false, "closing without logging in does not mark anything broken")
 
-        // 10. The 课堂派 calibration window loads the site with the capture hook installed from the first byte.
-        model.sources.calibrateKetangpai()
-        check(await until(5) { model.sources.activeLoginWebView != nil }, "the calibration window opens")
-        if let web = model.sources.activeLoginWebView {
-            let loaded = await until(30) { !web.isLoading && web.url != nil }
-            check(loaded, "the 课堂派 page finishes loading", web.url?.absoluteString ?? "nil")
-            check(web.url?.host?.contains("ketangpai.com") == true, "it is the 课堂派 site", web.url?.host ?? "nil")
-            await pause(1.5)
-            let hook = try? await web.evaluateJavaScript("window.__rbCapture === true")
-            check((hook as? Bool) == true, "the capture hook is installed in the page")
+            // 10. The 课堂派 calibration window loads the site with the capture hook installed from the first byte.
+            model.sources.calibrateKetangpai()
+            check(await until(5) { model.sources.activeLoginWebView != nil }, "the calibration window opens")
+            if let web = model.sources.activeLoginWebView {
+                let loaded = await until(30) { !web.isLoading && web.url != nil }
+                check(loaded, "the 课堂派 page finishes loading", web.url?.absoluteString ?? "nil")
+                check(web.url?.host?.contains("ketangpai.com") == true, "it is the 课堂派 site", web.url?.host ?? "nil")
+                await pause(1.5)
+                let hook = try? await web.evaluateJavaScript("window.__rbCapture === true")
+                check((hook as? Bool) == true, "the capture hook is installed in the page")
+            }
+            model.sources.closeLoginWindow()
+
         }
-        model.sources.closeLoginWindow()
 
         // 11. Items from Canvas / 课堂派 cannot be completed by hand; the website decides.
         let siteItem = Reminder(title: "冒烟：网站作业", due: Date().addingTimeInterval(7_200), isDeadline: true,
@@ -164,20 +323,23 @@ enum UISmokeTest {
         check(model.reminders.first { $0.id == ownItem.id }?.status == .done, "…and it completes")
         model.replaceReminders(model.reminders.filter { $0.id != siteItem.id && $0.id != ownItem.id })
 
-        // 12. Every press of the refresh button reads the websites again (the Canvas watcher from step 9 is still there).
-        func press() async -> (read: Bool, toast: String?) {
-            let before = WebSession.shared.requestCount
-            model.sources.refreshAll()
-            let done = await until(90) { !model.sources.isRefreshing && WebSession.shared.requestCount > before }
-            return (done, model.toast)
+        if !skipWeb {
+            // 12. Every press of the refresh button reads the websites again (the Canvas watcher from step 9 is still there).
+            func press() async -> (read: Bool, toast: String?) {
+                let before = WebSession.shared.requestCount
+                model.sources.refreshAll()
+                let done = await until(90) { !model.sources.isRefreshing && WebSession.shared.requestCount > before }
+                return (done, model.toast)
+            }
+            let first = await press()
+            check(first.read, "pressing refresh reads the website")
+            check(first.toast?.contains("同济 Canvas") == true, "…and the message says what the website reported", first.toast ?? "nil")
+            await pause(0.5)
+            let second = await press()
+            check(second.read, "pressing it again reads the website again (no waiting for the timer, no cache)")
+            check(second.toast?.contains("同济 Canvas") == true, "…and reports again", second.toast ?? "nil")
+
         }
-        let first = await press()
-        check(first.read, "pressing refresh reads the website")
-        check(first.toast?.contains("同济 Canvas") == true, "…and the message says what the website reported", first.toast ?? "nil")
-        await pause(0.5)
-        let second = await press()
-        check(second.read, "pressing it again reads the website again (no waiting for the timer, no cache)")
-        check(second.toast?.contains("同济 Canvas") == true, "…and reports again", second.toast ?? "nil")
 
         // 13. The link with Apple's Reminders, against an in-memory stand-in (the real database is never touched here).
         let fake = InMemoryAppleStore(calendar: Calendar.reminder, access: .notDetermined)
@@ -252,19 +414,6 @@ enum UISmokeTest {
         check(silent.accessRequests == 1, "…and does not ask again during the same launch", "\(silent.accessRequests)")
         model.apple.disable()
 
-        // Leave nothing of this run in the system's notification centre (its alerts use their own prefix).
-        if NotificationBridge.shared.isAvailable {
-            let center = UNUserNotificationCenter.current()
-            let prefix = NotificationBridge.shared.prefix
-            let pending = await center.pendingNotificationRequests().map(\.identifier).filter { $0.hasPrefix(prefix) }
-            center.removePendingNotificationRequests(withIdentifiers: pending)
-            let delivered = await center.deliveredNotifications().map(\.request.identifier).filter { $0.hasPrefix(prefix) }
-            center.removeDeliveredNotifications(withIdentifiers: delivered)
-        }
-
-        lines.append("")
-        lines.append("RESULT: \(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")")
-        try? lines.joined(separator: "\n").write(toFile: outputPath, atomically: true, encoding: .utf8)
-        NSApp.terminate(nil)
+        await finish()
     }
 }
